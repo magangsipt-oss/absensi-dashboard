@@ -1,0 +1,2 @@
+ALTER TABLE `employees`
+ADD COLUMN `nickname` VARCHAR(191) NOT NULL DEFAULT '';

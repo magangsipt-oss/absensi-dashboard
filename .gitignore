@@ -1,0 +1,19 @@
+# Local secrets and environment files
+**/.env
+**/.env.*
+!**/.env.example
+**/secrets.h
+
+# Dependencies and generated output
+**/node_modules/
+**/.next/
+**/.vercel/
+**/build/
+**/out/
+**/coverage/
+**/*.tsbuildinfo
+*.log
+
+# Local application data and machine-specific diagnostics
+absensi/data/*.json
+maintenance/mysql-replication/*.txt
