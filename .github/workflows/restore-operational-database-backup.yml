@@ -1,0 +1,51 @@
+name: Restore encrypted operational database backup
+
+on:
+  workflow_dispatch:
+    inputs:
+      backup_file_id:
+        description: Google Drive file ID of the selected operational backup
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: operational-database-restore
+  cancel-in-progress: false
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: data-restore
+    defaults:
+      run:
+        working-directory: absensi
+    env:
+      RESTORE_DATABASE_URL: ${{ secrets.RESTORE_DATABASE_URL }}
+      GOOGLE_DRIVE_CLIENT_ID: ${{ secrets.GOOGLE_DRIVE_CLIENT_ID }}
+      GOOGLE_DRIVE_CLIENT_SECRET: ${{ secrets.GOOGLE_DRIVE_CLIENT_SECRET }}
+      GOOGLE_DRIVE_REFRESH_TOKEN: ${{ secrets.GOOGLE_DRIVE_REFRESH_TOKEN }}
+      BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+      BACKUP_FILE_ID: ${{ inputs.backup_file_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: absensi/package-lock.json
+      - run: npm ci --omit=dev --ignore-scripts
+      - name: Validate restore configuration
+        run: |
+          node --input-type=module -e '
+            const required = ["RESTORE_DATABASE_URL", "GOOGLE_DRIVE_CLIENT_ID", "GOOGLE_DRIVE_CLIENT_SECRET", "GOOGLE_DRIVE_REFRESH_TOKEN", "BACKUP_ENCRYPTION_KEY", "BACKUP_FILE_ID"];
+            const missing = required.filter((name) => !process.env[name]?.trim());
+            if (missing.length) {
+              console.error(`Missing required GitHub Actions secrets or input: ${missing.join(", ")}`);
+              process.exit(1);
+            }
+          '
+      - run: node scripts/operational-backup.mjs restore "$BACKUP_FILE_ID"
