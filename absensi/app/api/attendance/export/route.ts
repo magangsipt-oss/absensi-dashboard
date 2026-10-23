@@ -1,4 +1,5 @@
 import { prisma } from "../../../../lib/attendance-store";
+import { assertProductionDatabaseTarget } from "../../../../lib/database-safety";
 import * as XLSX from "xlsx";
 
 function isValidMonth(value: string): boolean {
@@ -18,6 +19,16 @@ function getWitaDayBounds(value: string) {
 }
 
 export async function GET(request: Request) {
+  try {
+    await assertProductionDatabaseTarget();
+  } catch (error) {
+    console.error("Production database safety check failed:", error);
+    return Response.json(
+      { error: error instanceof Error ? error.message : "Database safety check failed." },
+      { status: 503 }
+    );
+  }
+
   const searchParams = new URL(request.url).searchParams;
   const month = searchParams.get("month") ?? "";
   const date = searchParams.get("date") ?? "";

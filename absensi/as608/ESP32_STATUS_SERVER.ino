@@ -5,8 +5,8 @@
 
 // Ganti dengan SSID dan password Wi‑Fi yang benar di jaringan Anda.
 // Pastikan jaringan yang dipakai adalah 2.4 GHz agar ESP32 bisa terhubung stabil.
-const char* ssid = "YOUR_WIFI_SSID";
-const char* password = "YOUR_WIFI_PASSWORD";
+const char* ssid = "WH Prapatan Atas";
+const char* password = "tangguhoptima2026";
 
 WebServer server(3000);
 HardwareSerial fingerprintSerial(2);
@@ -103,6 +103,24 @@ void setup() {
     String json = "{\"status\":\"online\",\"ip\":\"";
     json += WiFi.localIP().toString();
     json += "\",\"port\":3000}";
+    server.send(200, "application/json", json);
+  });
+
+  server.on("/api/templates", HTTP_GET, []() {
+    if (!fingerprintSensorReady) {
+      server.send(503, "application/json", "{\"error\":\"Sensor fingerprint tidak siap\"}");
+      return;
+    }
+
+    String json = "{\"templates\":[";
+    bool firstTemplate = true;
+    for (uint8_t id = 1; id <= 127; id++) {
+      if (fingerprint.loadModel(id) != FINGERPRINT_OK) continue;
+      if (!firstTemplate) json += ",";
+      json += String(id);
+      firstTemplate = false;
+    }
+    json += "]}";
     server.send(200, "application/json", json);
   });
 

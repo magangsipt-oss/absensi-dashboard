@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "db:deploy": "prisma migrate deploy",
     "telegram:bot": "node --env-file=.env.local --env-file=.env scripts/telegram-bot.mjs",
     "postinstall": "prisma generate"
   },

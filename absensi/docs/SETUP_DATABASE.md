@@ -43,6 +43,49 @@ DATABASE_URL="mysql://user:password@host.mysql.database.azure.com:3306/dbname"
 
 ---
 
+### Deployment di Vercel
+
+- Atur **Root Directory** proyek ke `absensi`, yaitu folder yang berisi `package.json` dan `vercel.json`.
+- Isi `DATABASE_URL` pada **Project Settings → Environment Variables** untuk environment yang dipakai deployment (Production dan, bila perlu, Preview). Gunakan database MySQL yang dapat dijangkau dari internet; `localhost` menunjuk ke server Vercel, bukan komputer atau MySQL lokal Anda.
+- Setelah mengubah environment variable, buat deployment baru agar nilainya diterapkan.
+- Build Vercel tidak menjalankan migrasi database, agar deployment aplikasi tidak gagal saat database sementara tidak dapat dijangkau. Jalankan `npm run db:deploy` dari folder proyek ketika database tersedia untuk menerapkan migration yang sudah ada. Jangan gunakan `prisma migrate reset` pada database yang berisi data.
+- Jika build sebelumnya gagal dengan Prisma `P1017`, perbaiki koneksi atau ketersediaan database terlebih dahulu. Build aplikasi dapat berhasil tanpa database, tetapi fitur yang membaca atau menulis data tetap memerlukan database aktif dan schema yang sudah dimigrasikan.
+- Jika dashboard menampilkan error database atau HTTP 500, periksa **Function Logs** deployment untuk `/api/attendance` dan pastikan `DATABASE_URL` mengarah ke database yang sama tempat data absensi tersimpan. Jangan menghapus atau membuat ulang database sebelum memastikan backup dan tujuan koneksinya.
+- Saat API gagal memuat data, dashboard mempertahankan data terakhir yang berhasil dimuat dan menampilkan peringatan bahwa data tidak tersedia, bukan menggantinya dengan daftar kosong. Jangan menyimpulkan data terhapus dari tampilan error/500.
+- Penghapusan massal mapping melalui API dinonaktifkan. Skrip pemeliharaan membuat dan memverifikasi backup mapping terlebih dahulu, lalu hanya meneruskan penghapusan jika ESP32 mengonfirmasi penghapusan sensor.
+
+### Backup dan pemulihan mapping fingerprint
+
+- Untuk prosedur langkah demi langkah menangani HTTP 500, membuat backup, menerapkan migration, dan memulihkan mapping, lihat [Panduan Maintenance dan Pemulihan Data Absensi](./PANDUAN_MAINTENANCE.md).
+- Riwayat perubahan mapping disimpan otomatis di tabel `fingerprint_mapping_audits` pada transaksi yang sama dengan perubahan mapping. Satu baris audit ditulis hanya ketika mapping dibuat, dipasangkan, dilepas, atau dihapus; scan absensi biasa tidak menambah audit. Ini merekam ID template, perangkat, pegawai sebelum/sesudah, dan jenis perubahan tanpa menyimpan sidik jari mentah atau mengirim perintah tambahan ke ESP32. Migration `20261021093000_add_fingerprint_mapping_audit` harus diterapkan sebelum kode aplikasi baru dirilis; migration membuat baseline untuk semua mapping yang sudah ada.
+- Riwayat audit membantu memulihkan mapping jika ada perubahan/penghapusan tidak sengaja selama database masih tersedia. Dari folder proyek, pemeriksaan tanpa perubahan:
+  ```bash
+  node --env-file=.env.local --env-file=.env restore-fingerprint-mappings.js --from-audit
+  ```
+  Untuk memulihkan mapping dari audit setelah memeriksa jumlahnya:
+  ```bash
+  node --env-file=.env.local --env-file=.env restore-fingerprint-mappings.js --from-audit --confirm=RESTORE-FINGERPRINT-MAPPINGS
+  ```
+  Pemulihan berhenti jika pegawai sudah tidak ada atau mapping berkonflik; template ESP32 tidak diubah.
+- Atur backup otomatis harian database MySQL pada penyedia database, dengan retensi minimal 7 hari. Simpan backup di lokasi terpisah dari database utama.
+- Setelah mengaktifkan backup, uji pemulihan ke database staging secara berkala. Backup yang belum pernah diuji belum dapat dianggap dapat dipulihkan.
+- Untuk membuat backup mapping lokal sebelum perubahan, jalankan dari folder proyek:
+  ```bash
+  node --env-file=.env.local --env-file=.env clear-all-fingerprints.js
+  ```
+  Perintah tanpa flag hanya membuat file JSON di `backups/`; tidak menghapus data. Folder ini diabaikan Git.
+- Jika diperlukan penghapusan penuh yang disengaja, skrip meminta flag persetujuan eksplisit:
+  ```bash
+  node --env-file=.env.local --env-file=.env clear-all-fingerprints.js --confirm=DELETE-ALL-FINGERPRINTS
+  ```
+  Skrip mencoba menghapus template di sensor lebih dahulu. Bila ESP32, port serial, atau endpoint gagal, mapping database tidak dihapus.
+- Untuk pemulihan, jalankan dulu tanpa flag untuk memvalidasi dan melihat jumlah data, lalu tambahkan flag konfirmasi:
+  ```bash
+  node --env-file=.env.local --env-file=.env restore-fingerprint-mappings.js backups\<nama-file-backup>.json
+  node --env-file=.env.local --env-file=.env restore-fingerprint-mappings.js backups\<nama-file-backup>.json --confirm=RESTORE-FINGERPRINT-MAPPINGS
+  ```
+  Backup ini berisi ID template, device ID, employee ID, dan pendaftaran tertunda, bukan data biometrik template. Pemulihan menolak pegawai yang sudah tidak ada atau mapping yang bertentangan.
+
 ## Langkah 2: Buka Terminal di Folder Proyek
 
 Buka **Command Prompt** atau **PowerShell**, lalu navigasi ke folder proyek:

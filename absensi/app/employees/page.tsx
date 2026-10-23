@@ -25,9 +25,12 @@ export default function EmployeesPage() {
     try {
       setError("");
       const response = await fetch("/api/employees");
-      if (!response.ok) throw new Error("Gagal memuat data");
       const data = await response.json();
-      setEmployees(data.employees || []);
+      if (!response.ok) throw new Error(data.error || "Gagal memuat data pegawai");
+      if (!Array.isArray(data.employees)) {
+        throw new Error("Respons server tidak berisi daftar pegawai yang valid.");
+      }
+      setEmployees(data.employees);
       setLoading(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Gagal memuat data");
@@ -68,7 +71,8 @@ export default function EmployeesPage() {
       }
 
       const data = await response.json();
-      setEmployees(data.employees || []);
+      if (Array.isArray(data.employees)) setEmployees(data.employees);
+      else await fetchEmployees();
       setFormName("");
       setFormEmail("");
       setFormDepartment("Spm");
@@ -81,7 +85,7 @@ export default function EmployeesPage() {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm("Hapus pegawai ini?")) return;
+    if (!confirm("Hapus pegawai ini beserta relasi mapping fingerprint-nya?")) return;
 
     try {
       setError("");
@@ -91,10 +95,14 @@ export default function EmployeesPage() {
         body: JSON.stringify({
           action: "delete",
           id,
+          confirmation: "DELETE_EMPLOYEE",
         }),
       });
 
-      if (!response.ok) throw new Error("Gagal menghapus");
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({}));
+        throw new Error(result.error || "Gagal menghapus pegawai");
+      }
       const data = await response.json();
       setEmployees(data.employees || []);
     } catch (err) {

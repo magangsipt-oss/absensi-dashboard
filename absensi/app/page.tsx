@@ -75,6 +75,11 @@ export default function HomePage() {
           </div>
         </div>
       </div>
+      <footer className="pb-6 text-center text-sm text-slate-400">
+        <a href="/privacy" className="hover:text-emerald-300">
+          Kebijakan privasi (draf)
+        </a>
+      </footer>
     </main>
   );
 }

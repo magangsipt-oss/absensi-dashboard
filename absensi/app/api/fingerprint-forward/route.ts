@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { assertProductionDatabaseTarget } from "../../../lib/database-safety";
 type FingerprintAttendanceStatus = "Hadir" | "Terlambat" | "Pulang";
 
 const attendanceTimeZone = "Asia/Makassar";
@@ -58,6 +59,16 @@ export async function POST(request: Request) {
         message: "Connection test successful",
         timestamp: new Date().toISOString(),
       });
+    }
+
+    try {
+      await assertProductionDatabaseTarget();
+    } catch (error) {
+      console.error("Production database safety check failed:", error);
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "Database safety check failed." },
+        { status: 503 }
+      );
     }
 
     const { fingerprintId, deviceName, timestamp, source } = payload;
@@ -270,15 +281,12 @@ export async function POST(request: Request) {
       );
     } catch (dbError) {
       console.error("Database error:", dbError);
-      // If database error, still acknowledge receipt
       return NextResponse.json(
         {
-          success: true,
-          message: "Fingerprint data received (database unavailable)",
-          fingerprintId,
-          warning: "Could not record in database",
+          success: false,
+          error: "Absensi tidak dapat disimpan. Periksa koneksi database lalu kirim ulang.",
         },
-        { status: 200 }
+        { status: 503 }
       );
     }
   } catch (error) {

@@ -67,22 +67,19 @@ ESP32 akan mengirim request ke endpoint:
   - `{"action":"deviceEnroll","deviceId":"ESP32-01","templateId":12,"employeeId":5,"templateData":"<template-bytes-or-string>"}`
   - `{"action":"deviceCheckin","deviceId":"ESP32-01","templateId":12}`
 
-> `employeeId` bersifat opsional saat enroll. Jika dikirim, hasil scan sidik jari langsung tersimpan ke database web dengan `templateId` dan `employeeId` yang terhubung. `templateData` juga akan disimpan ke kolom `template_data` bila tersedia.
+> `employeeId` bersifat opsional saat enroll. Jika tidak dikirim, template disimpan sebagai belum dipetakan; hubungkan ke pegawai di halaman Admin sebelum absensi. Jika pegawai memiliki `pendingFingerprintId` yang sama, backend dapat memetakan otomatis. Firmware utama juga mengirim daftar ID yang tersimpan di sensor secara berkala sehingga ID yang gagal terkirim saat pendaftaran dapat direkonsiliasi.
 
 ## 3. Alur kerja perangkat
 
-1. `deviceEnroll`
-   - Dipanggil setelah fingerprint tersimpan pada sensor
-   - Menyimpan `templateId` dan `templateData` di database `fingerprint_mappings`
-   - Jika `employeeId` dikirim, maka mapping langsung terikat ke pegawai tersebut
-2. Mapping manual (opsional)
-   - Buka halaman admin `http://localhost:3000/admin`
-   - Cari tabel fingerprint mapping
-   - Pilih pegawai dan klik `Map`
-3. `deviceCheckin`
-   - Dipanggil saat fingerprint terverifikasi
-   - Backend akan membuat entri `attendanceRecord`
-   - Hanya berhasil jika `templateId` sudah di-map ke `employeeId`
+1. Untuk penggunaan dengan Vercel/production, upload sketch utama `fingerprint_sensor/fingerprint_sensor.ino`. Sketch ini mengirim daftar ID yang benar-benar tersimpan di sensor ke backend setelah boot dan setiap 60 detik saat Wi-Fi online. Sketch `as608/ESP32_STATUS_SERVER.ino` adalah mode lama untuk integrasi lokal/Serial dan tidak melakukan sinkronisasi cloud ini.
+2. Pastikan `attendanceApiUrl`, `DEVICE_KEY`, dan `deviceId` pada firmware sesuai dengan backend dan secret Vercel. Tombol **Sinkronkan dari ESP32** di Admin mengantrekan perintah; perangkat memprosesnya saat online.
+3. Jika `pendingFingerprintId` pegawai sama persis dengan ID sensor, backend memetakan otomatis. Selain itu, cocokkan ID dengan pegawai yang benar lalu klik **Map**. Jangan menghapus atau mendaftarkan ulang sidik jari yang LCD-nya mengatakan sudah terdaftar.
+
+Sesudah template disinkronkan:
+
+- `deviceEnroll` menyimpan templateId ke `fingerprint_mappings`. Jika `employeeId` atau `pendingFingerprintId` yang cocok tersedia, mapping terikat ke pegawai; jika tidak, mapping tetap menunggu pemetaan manual.
+- Untuk mapping manual, buka halaman Admin, pilih pegawai yang sudah diverifikasi untuk ID tersebut, lalu klik **Map**.
+- `deviceCheckin` mencatat absensi ketika sidik jari dikenali dan templateId sudah terhubung ke employeeId.
 
 ## 4. Contoh sketch ESP32 lengkap
 

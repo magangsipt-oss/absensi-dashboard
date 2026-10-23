@@ -1,5 +1,11 @@
 {
   "framework": "nextjs",
-  "buildCommand": "prisma migrate deploy && npm run build",
-  "installCommand": "npm ci"
+  "buildCommand": "npm run build",
+  "installCommand": "npm ci",
+  "crons": [
+    {
+      "path": "/api/cron/fingerprint-mapping-backup",
+      "schedule": "0 10 * * 0"
+    }
+  ]
 }

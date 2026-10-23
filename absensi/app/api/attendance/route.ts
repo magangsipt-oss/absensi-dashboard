@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 import { addAttendanceRecord, getAttendanceState, toggleAttendanceStatus, prisma } from "../../../lib/attendance-store";
+import { writeFingerprintMappingAudit } from "../../../lib/fingerprint-mapping-audit";
+import { scheduleFingerprintMappingBackup } from "../../../lib/fingerprint-mapping-backup";
+import { assertProductionDatabaseTarget } from "../../../lib/database-safety";
 import fs from "fs";
 import path from "path";
 import {
@@ -105,26 +108,36 @@ async function deleteFingerprintFromEsp32(templateId: number) {
 
 export async function GET() {
   try {
-    await prisma.fingerprintVerificationLog.deleteMany({
-      where: {
-        status: { contains: "Duplikat" },
-        verifiedAt: { lt: new Date(Date.now() - 60 * 1000) },
-      },
-    });
+    await assertProductionDatabaseTarget();
     const state = await getAttendanceState();
     return NextResponse.json(state);
   } catch (error) {
     console.error("Error fetching attendance state:", error);
     return NextResponse.json(
-      { error: "Database connection failed. Please ensure database is set up." },
-      { status: 500 }
+      { error: error instanceof Error ? error.message : "Gagal memverifikasi database." },
+      { status: 503 }
     );
   }
 }
 
 export async function POST(request: Request) {
   try {
+    await assertProductionDatabaseTarget();
     const payload = await request.json().catch(() => ({}));
+
+    if (payload?.action === "syncSensorTemplates") {
+      const deviceId = String(payload.deviceId || "ESP32-01").trim();
+      if (!deviceId || deviceId.length > 64) {
+        return NextResponse.json({ error: "deviceId invalid" }, { status: 400 });
+      }
+      const command = await prisma.deviceCommand.create({
+        data: { deviceId, command: "SYNC_TEMPLATES" },
+      });
+      return NextResponse.json(
+        { ok: true, queued: true, commandId: command.id, deviceId },
+        { status: 202 }
+      );
+    }
 
     if (payload?.action === "deviceSync") {
       const key = request.headers.get("x-device-key");
@@ -150,6 +163,119 @@ export async function POST(request: Request) {
             nickname: employee?.nickname || employee?.name || "",
           };
         }).filter((mapping) => mapping.nickname),
+      });
+    }
+
+    if (payload?.action === "deviceSyncTemplates") {
+      const key = request.headers.get("x-device-key");
+      if (key !== process.env.DEVICE_KEY) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      }
+
+      const deviceId = String(payload.deviceId || "").trim();
+      if (!deviceId || deviceId.length > 64) {
+        return NextResponse.json({ error: "deviceId invalid" }, { status: 400 });
+      }
+      if (!Array.isArray(payload.templates)) {
+        return NextResponse.json({ error: "templates must be an array" }, { status: 400 });
+      }
+
+      const receivedTemplateIds: unknown[] = payload.templates;
+      const numericTemplateIds: number[] = receivedTemplateIds.map((value) => Number(value));
+      const templateIds = [...new Set(numericTemplateIds)]
+        .filter((templateId) => Number.isInteger(templateId) && templateId >= 1 && templateId <= 127)
+        .sort((first, second) => first - second);
+      if (templateIds.length === 0) {
+        return NextResponse.json({ error: "No valid fingerprint templates received" }, { status: 400 });
+      }
+
+      const existingMappings = await prisma.fingerprintMapping.findMany({
+        where: { templateId: { in: templateIds } },
+        select: { templateId: true, deviceId: true, employeeId: true },
+      });
+      const existingByTemplateId = new Map(
+        existingMappings.map((mapping) => [mapping.templateId, mapping])
+      );
+      const pendingEmployees = await prisma.employee.findMany({
+        where: { pendingFingerprintId: { in: templateIds } },
+        select: { id: true, pendingFingerprintId: true },
+      });
+      const pendingEmployeeByTemplateId = new Map(
+        pendingEmployees.flatMap((employee) =>
+          employee.pendingFingerprintId === null
+            ? []
+            : [[employee.pendingFingerprintId, employee.id] as const]
+        )
+      );
+      let changedTemplateCount = 0;
+      let autoMappedCount = 0;
+      await prisma.$transaction(async (transaction) => {
+        for (const templateId of templateIds) {
+          const existing = existingByTemplateId.get(templateId);
+          const pendingEmployeeId = pendingEmployeeByTemplateId.get(templateId);
+          const mappedEmployeeId = existing?.employeeId ?? pendingEmployeeId ?? null;
+          const savedMapping = await transaction.fingerprintMapping.upsert({
+            where: { templateId },
+            update: {
+              ...(!existing?.deviceId ? { deviceId } : {}),
+              ...(existing?.employeeId === null && pendingEmployeeId
+                ? { employeeId: pendingEmployeeId }
+                : {}),
+            },
+            create: { templateId, deviceId, employeeId: mappedEmployeeId, templateData: null },
+          });
+
+          if (
+            !existing ||
+            existing.deviceId !== savedMapping.deviceId ||
+            existing.employeeId !== savedMapping.employeeId
+          ) {
+            changedTemplateCount += 1;
+            const auditAction = !existing
+              ? "DISCOVERED"
+              : existing.employeeId !== savedMapping.employeeId
+                ? "MAPPED"
+                : "DEVICE_CHANGED";
+            await writeFingerprintMappingAudit(transaction, {
+              action: auditAction,
+              templateId,
+              deviceId: savedMapping.deviceId,
+              previousEmployeeId: existing?.employeeId ?? null,
+              employeeId: savedMapping.employeeId,
+            });
+          }
+
+          if (pendingEmployeeId && savedMapping.employeeId === pendingEmployeeId) {
+            const cleared = await transaction.employee.updateMany({
+              where: { id: pendingEmployeeId, pendingFingerprintId: templateId },
+              data: { pendingFingerprintId: null },
+            });
+            autoMappedCount += cleared.count;
+          }
+        }
+
+        if (autoMappedCount > 0) {
+          await transaction.deviceCommand.create({
+            data: { deviceId, command: "SYNC_NICKNAMES" },
+          });
+        }
+      });
+      if (changedTemplateCount > 0 || autoMappedCount > 0) {
+        scheduleFingerprintMappingBackup("device-template-sync");
+      }
+
+      return NextResponse.json({
+        ok: true,
+        deviceId,
+        templates: templateIds,
+        syncedCount: templateIds.length,
+        newlyDiscoveredCount: templateIds.filter((templateId) => !existingByTemplateId.has(templateId)).length,
+        unmappedCount: templateIds.filter(
+          (templateId) =>
+            !existingByTemplateId.get(templateId)?.employeeId &&
+            !pendingEmployeeByTemplateId.has(templateId)
+        ).length,
+        autoMappedCount,
       });
     }
 
@@ -288,8 +414,14 @@ export async function POST(request: Request) {
       if (!Number.isInteger(recordId) || recordId < 1) {
         return NextResponse.json({ error: "recordId invalid" }, { status: 400 });
       }
+      if (payload.confirmation !== "DELETE_SINGLE_ATTENDANCE_RECORD") {
+        return NextResponse.json(
+          { error: "Konfirmasi penghapusan absensi tidak valid." },
+          { status: 400 }
+        );
+      }
 
-      await prisma.attendanceRecord.delete({ where: { id: recordId } }).catch(() => null);
+      await prisma.attendanceRecord.delete({ where: { id: recordId } });
       return NextResponse.json(await getAttendanceState());
     }
 
@@ -298,12 +430,24 @@ export async function POST(request: Request) {
       if (!Number.isInteger(logId) || logId < 1) {
         return NextResponse.json({ error: "logId invalid" }, { status: 400 });
       }
+      if (payload.confirmation !== "DELETE_VERIFICATION_LOG") {
+        return NextResponse.json(
+          { error: "Konfirmasi penghapusan log verifikasi tidak valid." },
+          { status: 400 }
+        );
+      }
 
-      await prisma.fingerprintVerificationLog.delete({ where: { id: logId } }).catch(() => null);
+      await prisma.fingerprintVerificationLog.delete({ where: { id: logId } });
       return NextResponse.json(await getAttendanceState());
     }
 
     if (payload?.action === "deletePastAttendance") {
+      if (payload.confirmation !== "DELETE_PAST_ATTENDANCE") {
+        return NextResponse.json(
+          { error: "Konfirmasi penghapusan absensi lampau tidak valid." },
+          { status: 400 }
+        );
+      }
       const { start: today, end: tomorrow } = getWitaDayBounds(new Date());
       await prisma.$transaction([
         prisma.fingerprintVerificationLog.deleteMany({ where: { verifiedAt: { lt: today } } }),
@@ -314,6 +458,12 @@ export async function POST(request: Request) {
     }
 
     if (payload?.action === "deleteTodayAttendance") {
+      if (payload.confirmation !== "DELETE_TODAY_ATTENDANCE") {
+        return NextResponse.json(
+          { error: "Konfirmasi penghapusan absensi hari ini tidak valid." },
+          { status: 400 }
+        );
+      }
       const { start: today, end: tomorrow } = getWitaDayBounds(new Date());
 
       await prisma.$transaction([
@@ -473,7 +623,7 @@ export async function POST(request: Request) {
       if (typeof templateId === "undefined") return NextResponse.json({ error: "templateId required" }, { status: 400 });
 
       const templateIdNumber = Number(templateId);
-      if (!Number.isInteger(templateIdNumber) || templateIdNumber < 0) {
+      if (!Number.isInteger(templateIdNumber) || templateIdNumber < 1 || templateIdNumber > 127) {
         return NextResponse.json({ error: "templateId invalid" }, { status: 400 });
       }
 
@@ -488,34 +638,76 @@ export async function POST(request: Request) {
         const employee = await prisma.employee.findUnique({ where: { id: normalizedEmployeeId } });
         if (!employee) return NextResponse.json({ error: "employee not found" }, { status: 404 });
       }
+      const pendingEmployee = normalizedEmployeeId === null
+        ? await prisma.employee.findUnique({
+            where: { pendingFingerprintId: templateIdNumber },
+            select: { id: true },
+          })
+        : null;
 
       try {
-        const existing = await prisma.fingerprintMapping.findUnique({ where: { templateId: templateIdNumber } });
         const normalizedTemplateData = normalizeFingerprintTemplate(templateData);
-        const previousTemplateData = (existing as any)?.templateData ?? null;
+        const mapping = await prisma.$transaction(async (transaction) => {
+          const existing = await transaction.fingerprintMapping.findUnique({ where: { templateId: templateIdNumber } });
+          const mappedEmployeeId = normalizedEmployeeId ?? existing?.employeeId ?? pendingEmployee?.id ?? null;
+          const savedMapping = existing
+            ? await transaction.fingerprintMapping.update({
+                where: { templateId: templateIdNumber },
+                data: {
+                  deviceId: deviceId || existing.deviceId || null,
+                  templateData: typeof templateData === "undefined" ? existing.templateData : normalizedTemplateData,
+                  employeeId: mappedEmployeeId,
+                },
+              })
+            : await transaction.fingerprintMapping.create({
+                data: {
+                  deviceId: deviceId || null,
+                  templateId: templateIdNumber,
+                  templateData: normalizedTemplateData,
+                  employeeId: mappedEmployeeId,
+                },
+              });
 
-        const mapping = existing
-          ? await prisma.fingerprintMapping.update({
-              where: { templateId: templateIdNumber },
+          if (
+            !existing ||
+            existing.deviceId !== savedMapping.deviceId ||
+            existing.employeeId !== savedMapping.employeeId
+          ) {
+            await writeFingerprintMappingAudit(transaction, {
+              action: existing ? "ENROLL_UPDATED" : "ENROLLED",
+              templateId: templateIdNumber,
+              deviceId: savedMapping.deviceId,
+              previousEmployeeId: existing?.employeeId,
+              employeeId: savedMapping.employeeId,
+            });
+          }
+
+          if (pendingEmployee && savedMapping.employeeId === pendingEmployee.id) {
+            await transaction.employee.updateMany({
+              where: { id: pendingEmployee.id, pendingFingerprintId: templateIdNumber },
+              data: { pendingFingerprintId: null },
+            });
+            await transaction.deviceCommand.create({
               data: {
-                deviceId: deviceId || existing.deviceId || null,
-                templateData: typeof templateData === "undefined" ? previousTemplateData : normalizedTemplateData,
-                employeeId: normalizedEmployeeId ?? existing.employeeId,
-              },
-            })
-          : await prisma.fingerprintMapping.create({
-              data: {
-                deviceId: deviceId || null,
-                templateId: templateIdNumber,
-                templateData: normalizedTemplateData,
-                employeeId: normalizedEmployeeId,
+                deviceId: savedMapping.deviceId || deviceId || "ESP32-01",
+                command: "SYNC_NICKNAMES",
               },
             });
+          }
+
+          return savedMapping;
+        });
+        scheduleFingerprintMappingBackup("device-enroll");
 
         const state = await getAttendanceState();
-        return NextResponse.json({ ok: true, mapping, state });
-      } catch (err: any) {
-        console.error(err);
+        return NextResponse.json({
+          ok: true,
+          mapping,
+          autoMapped: pendingEmployee !== null && mapping.employeeId === pendingEmployee.id,
+          state,
+        });
+      } catch (error) {
+        console.error(error);
         return NextResponse.json({ error: "failed to save fingerprint" }, { status: 500 });
       }
     }
@@ -544,18 +736,58 @@ export async function POST(request: Request) {
         const employee = await prisma.employee.findUnique({ where: { id: rawEmployeeId } });
         if (!employee) return NextResponse.json({ error: "employee not found" }, { status: 404 });
 
-        map = await prisma.fingerprintMapping.create({
-          data: {
-            deviceId: deviceId || null,
+        map = await prisma.$transaction(async (transaction) => {
+          const createdMapping = await transaction.fingerprintMapping.create({
+            data: {
+              deviceId: deviceId || null,
+              templateId: templateIdNumber,
+              employeeId: rawEmployeeId,
+              templateData: null,
+            },
+          });
+          await writeFingerprintMappingAudit(transaction, {
+            action: "ENROLLED_ON_CHECKIN",
             templateId: templateIdNumber,
-            employeeId: rawEmployeeId,
-            templateData: null,
-          },
+            deviceId: createdMapping.deviceId,
+            employeeId: createdMapping.employeeId,
+          });
+          return createdMapping;
         });
+        scheduleFingerprintMappingBackup("device-checkin-created-mapping");
       }
 
       const resolvedEmployeeId = map?.employeeId ?? rawEmployeeId;
       if (!resolvedEmployeeId) {
+        if (!map) {
+          const discoveredMapping = await prisma.$transaction(async (transaction) => {
+            const createdMapping = await transaction.fingerprintMapping.create({
+              data: {
+                deviceId: deviceId || null,
+                templateId: templateIdNumber,
+                employeeId: null,
+                templateData: null,
+              },
+            });
+            await writeFingerprintMappingAudit(transaction, {
+              action: "DISCOVERED_ON_CHECKIN",
+              templateId: templateIdNumber,
+              deviceId: createdMapping.deviceId,
+              employeeId: null,
+            });
+            return createdMapping;
+          });
+          map = discoveredMapping;
+          scheduleFingerprintMappingBackup("unmapped-device-checkin");
+        }
+        await prisma.fingerprintVerificationLog.create({
+          data: {
+            deviceId: deviceId || null,
+            templateId: templateIdNumber,
+            status: "Belum dipetakan",
+            note: "ID fingerprint dikenali sensor tetapi belum dihubungkan ke pegawai.",
+            verifiedAt: new Date(),
+          },
+        });
         return NextResponse.json({ error: "Template not mapped to employee" }, { status: 404 });
       }
 
@@ -643,19 +875,48 @@ export async function POST(request: Request) {
       if (typeof templateId === "undefined") return NextResponse.json({ error: "templateId required" }, { status: 400 });
       const templateIdNumber = Number(templateId);
       const employeeIdNumber = employeeId ? Number(employeeId) : null;
-      const mapping = await prisma.fingerprintMapping.update({
-        where: { templateId: templateIdNumber },
-        data: { employeeId: employeeIdNumber },
-      });
-      if (employeeId) {
-        await (prisma.employee as any).updateMany({ where: { pendingFingerprintId: templateIdNumber }, data: { pendingFingerprintId: null } });
+      if (!Number.isInteger(templateIdNumber) || templateIdNumber < 1 || templateIdNumber > 127) {
+        return NextResponse.json({ error: "templateId invalid" }, { status: 400 });
       }
-      await prisma.deviceCommand.create({
-        data: {
-          deviceId: mapping.deviceId || "ESP32-01",
-          command: "SYNC_NICKNAMES",
-        },
+      if (employeeIdNumber !== null && (!Number.isInteger(employeeIdNumber) || employeeIdNumber < 1)) {
+        return NextResponse.json({ error: "employeeId invalid" }, { status: 400 });
+      }
+      await prisma.$transaction(async (transaction) => {
+        const existing = await transaction.fingerprintMapping.findUnique({ where: { templateId: templateIdNumber } });
+        if (!existing) throw new Error(`Fingerprint mapping ${templateIdNumber} tidak ditemukan`);
+        if (employeeIdNumber !== null) {
+          const employee = await transaction.employee.findUnique({ where: { id: employeeIdNumber }, select: { id: true } });
+          if (!employee) throw new Error(`Pegawai ${employeeIdNumber} tidak ditemukan`);
+        }
+
+        const updatedMapping = await transaction.fingerprintMapping.update({
+          where: { templateId: templateIdNumber },
+          data: { employeeId: employeeIdNumber },
+        });
+        if (existing.employeeId !== updatedMapping.employeeId) {
+          await writeFingerprintMappingAudit(transaction, {
+            action: employeeIdNumber === null ? "UNMAPPED" : "MAPPED",
+            templateId: templateIdNumber,
+            deviceId: updatedMapping.deviceId,
+            previousEmployeeId: existing.employeeId,
+            employeeId: updatedMapping.employeeId,
+          });
+        }
+        if (employeeIdNumber !== null) {
+          await transaction.employee.updateMany({
+            where: { pendingFingerprintId: templateIdNumber },
+            data: { pendingFingerprintId: null },
+          });
+        }
+        await transaction.deviceCommand.create({
+          data: {
+            deviceId: updatedMapping.deviceId || "ESP32-01",
+            command: "SYNC_NICKNAMES",
+          },
+        });
+        return updatedMapping;
       });
+      scheduleFingerprintMappingBackup("admin-map-template");
       const state = await getAttendanceState();
       return NextResponse.json({ ok: true, state });
     }
@@ -665,34 +926,50 @@ export async function POST(request: Request) {
       if (!Number.isInteger(templateId) || templateId < 1 || templateId > 127) {
         return NextResponse.json({ error: "templateId invalid" }, { status: 400 });
       }
+      if (payload.confirmation !== "DELETE_FINGERPRINT_MAPPING") {
+        return NextResponse.json(
+          { error: "Konfirmasi penghapusan mapping fingerprint tidak valid." },
+          { status: 400 }
+        );
+      }
       const mapping = await prisma.fingerprintMapping.findUnique({ where: { templateId } });
       if (!mapping) return NextResponse.json({ error: "Mapping tidak ditemukan" }, { status: 404 });
-      await prisma.deviceCommand.create({
-        data: {
-          deviceId: mapping.deviceId || "ESP32-01",
-          command: "DELETE_FINGERPRINT",
+      await prisma.$transaction(async (transaction) => {
+        await transaction.deviceCommand.create({
+          data: {
+            deviceId: mapping.deviceId || "ESP32-01",
+            command: "DELETE_FINGERPRINT",
+            templateId,
+          },
+        });
+        await writeFingerprintMappingAudit(transaction, {
+          action: "DELETED",
           templateId,
-        },
+          deviceId: mapping.deviceId,
+          previousEmployeeId: mapping.employeeId,
+          employeeId: mapping.employeeId,
+        });
+        await transaction.fingerprintMapping.delete({ where: { templateId } });
       });
-      await prisma.fingerprintMapping.delete({ where: { templateId } }).catch(() => null);
-      if (mapping.employeeId) {
-        await prisma.attendanceRecord.updateMany({ where: { employeeId: mapping.employeeId }, data: { employeeId: null } });
-        await prisma.fingerprintVerificationLog.updateMany({ where: { employeeId: mapping.employeeId }, data: { employeeId: null } });
-        await prisma.employee.delete({ where: { id: mapping.employeeId } }).catch(() => null);
-      }
+      scheduleFingerprintMappingBackup("admin-delete-mapping");
       const state = await getAttendanceState();
       return NextResponse.json({ ok: true, state });
     }
 
     if (payload?.action === "deleteAllMappings") {
-      await prisma.fingerprintMapping.deleteMany({});
-      const state = await getAttendanceState();
-      return NextResponse.json({ ok: true, state });
+      console.warn("Blocked legacy deleteAllMappings request");
+      return NextResponse.json(
+        { error: "Penghapusan massal mapping dinonaktifkan untuk melindungi data." },
+        { status: 410 }
+      );
     }
 
     return NextResponse.json({ error: "unsupported action" }, { status: 400 });
   } catch (error) {
     console.error(error);
-    return NextResponse.json({ error: "Gagal memproses request" }, { status: 500 });
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Gagal memproses request." },
+      { status: 500 }
+    );
   }
 }

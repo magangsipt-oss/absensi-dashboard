@@ -13,6 +13,16 @@ interface AttendanceRecord {
   checkedAt: string;
 }
 
+interface FingerprintVerificationLog {
+  id: number;
+  employeeId?: number | null;
+  deviceId?: string | null;
+  templateId: number;
+  status: string;
+  note?: string | null;
+  verifiedAt: string;
+}
+
 interface Employee {
   id: number;
   name: string;
@@ -34,6 +44,7 @@ interface AttendanceState {
   today: string;
   records: AttendanceRecord[];
   employees: Employee[];
+  verificationLogs?: FingerprintVerificationLog[];
   annualSummary?: { workdays: AnnualDay[] };
 }
 
@@ -56,7 +67,8 @@ export default function DailySummaryPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    setDate(new URLSearchParams(window.location.search).get("date") || new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Makassar" }).format(new Date()));
+    const requestedDate = new URLSearchParams(window.location.search).get("date")
+      || new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Makassar" }).format(new Date());
     if (window.localStorage.getItem("admin_authenticated") !== "true") {
       router.push("/");
       return;
@@ -66,8 +78,14 @@ export default function DailySummaryPage() {
         if (!response.ok) throw new Error("Gagal memuat rekap harian");
         return response.json();
       })
-      .then(setAttendance)
-      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Gagal memuat data"))
+      .then((data) => {
+        setDate(requestedDate);
+        setAttendance(data);
+      })
+      .catch((reason: unknown) => {
+        setDate(requestedDate);
+        setError(reason instanceof Error ? reason.message : "Gagal memuat data");
+      })
       .finally(() => setLoading(false));
   }, [router]);
 
@@ -75,6 +93,10 @@ export default function DailySummaryPage() {
   const records = useMemo(
     () => attendance?.records.filter((record) => jakartaDate(record.checkedAt) === date) ?? [],
     [attendance?.records, date],
+  );
+  const verificationLogs = useMemo(
+    () => attendance?.verificationLogs?.filter((log) => jakartaDate(log.verifiedAt) === date) ?? [],
+    [attendance?.verificationLogs, date],
   );
   const rows = useMemo(() => (attendance?.employees ?? []).map((employee) => {
     const employeeRecords = records.filter((record) => record.employeeId === employee.id || (!record.employeeId && record.name === employee.name));
@@ -113,6 +135,43 @@ export default function DailySummaryPage() {
             <section className="rounded-2xl border border-emerald-100 bg-white p-6 shadow-sm">
               <div className="flex items-center justify-between gap-3"><div><p className="text-sm font-medium text-emerald-600">Rekap absensi</p><h2 className="text-xl font-bold text-slate-900">Masuk dan keluar pegawai</h2></div><span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">{day?.totalScans ?? 0} scan</span></div>
               <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200"><table className="min-w-full text-left text-sm"><thead className="bg-emerald-50 text-slate-600"><tr>{["No", "Nama", "ID", "Masuk", "Pulang", "Keterangan"].map((title) => <th key={title} className="px-4 py-3 font-semibold">{title}</th>)}</tr></thead><tbody className="divide-y divide-slate-100">{rows.map((row, index) => <tr key={row.employee.id} className="hover:bg-emerald-50/50"><td className="px-4 py-3 text-slate-500">{index + 1}</td><td className="px-4 py-3 font-medium text-slate-800">{row.employee.name}</td><td className="px-4 py-3 font-mono text-slate-600">{row.employee.id}</td><td className="px-4 py-3">{row.arrival?.time || "-"}</td><td className="px-4 py-3">{row.departure?.time || "-"}</td><td className="px-4 py-3 text-slate-600">{row.manual?.status || row.summaryPerson?.status || "-"}{row.manual?.note && row.manual.note !== "-" ? `: ${row.manual.note}` : ""}</td></tr>)}</tbody></table></div>
+            </section>
+
+            <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-emerald-600">Riwayat verifikasi</p>
+                  <h2 className="text-xl font-bold text-slate-900">Log fingerprint hari ini</h2>
+                </div>
+                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">{verificationLogs.length} log</span>
+              </div>
+              <p className="mt-2 text-sm text-slate-500">Log yang memiliki nama pegawai dapat membantu mencocokkan Template ID dengan pegawai. Log tanpa pegawai belum membuktikan siapa pemilik ID tersebut.</p>
+              <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="bg-slate-50 text-slate-600">
+                    <tr>
+                      {["Waktu", "Nama pegawai", "Template ID", "Perangkat", "Status", "Catatan"].map((title) => <th key={title} className="px-4 py-3 font-semibold">{title}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {verificationLogs.length ? verificationLogs.map((log) => {
+                      const employee = log.employeeId ? attendance?.employees.find((item) => item.id === log.employeeId) : null;
+                      return (
+                        <tr key={log.id} className="hover:bg-slate-50">
+                          <td className="whitespace-nowrap px-4 py-3">{new Date(log.verifiedAt).toLocaleTimeString("id-ID", { timeZone: "Asia/Makassar", hour: "2-digit", minute: "2-digit" })}</td>
+                          <td className="px-4 py-3">{employee?.name || "Belum terhubung ke pegawai"}</td>
+                          <td className="px-4 py-3 font-semibold">{log.templateId}</td>
+                          <td className="px-4 py-3">{log.deviceId || "-"}</td>
+                          <td className="px-4 py-3">{log.status}</td>
+                          <td className="px-4 py-3 text-slate-500">{log.note || "-"}</td>
+                        </tr>
+                      );
+                    }) : (
+                      <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-500">Tidak ada log fingerprint pada tanggal ini.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </section>
           </>
         )}
