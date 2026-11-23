@@ -71,6 +71,14 @@ export default function AdminPage() {
   const [dataLoadError, setDataLoadError] = useState<string | null>(null);
   const [fingerprintListener, setFingerprintListener] = useState("Menyiapkan listener fingerprint...");
   const [mappingMessage, setMappingMessage] = useState<string | null>(null);
+  const [manualMessage, setManualMessage] = useState<string | null>(null);
+  const [manualForm, setManualForm] = useState({
+    employeeId: "",
+    status: "sakit",
+    date: "",
+    time: "08:00",
+    note: "",
+  });
   const [selectedEmployees, setSelectedEmployees] = useState<Record<number, string>>({});
 
   const fetchAttendance = async () => {
@@ -141,6 +149,39 @@ export default function AdminPage() {
       console.error(err);
       setMsg(err instanceof Error ? err.message : "Gagal menghapus record");
       setTimeout(() => setMsg(null), 4000);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitManualAttendance = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!manualForm.employeeId) {
+      setManualMessage("Pilih pegawai terlebih dahulu.");
+      return;
+    }
+    setBusy(true);
+    setManualMessage(null);
+    try {
+      const response = await fetch("/api/attendance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "addDaily",
+          employeeId: Number(manualForm.employeeId),
+          status: manualForm.status,
+          tgl: manualForm.date || attendance?.today,
+          masuk: manualForm.status === "site" ? manualForm.time || "08:00" : "-",
+          keterangan: manualForm.note,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Gagal menyimpan absensi manual");
+      await fetchAttendance();
+      setManualForm((current) => ({ ...current, employeeId: "", note: "" }));
+      setManualMessage("Absensi manual berhasil disimpan.");
+    } catch (error) {
+      setManualMessage(error instanceof Error ? error.message : "Gagal menyimpan absensi manual");
     } finally {
       setBusy(false);
     }
@@ -722,6 +763,82 @@ export default function AdminPage() {
               </p>
             </div>
           </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <p className="text-sm font-medium text-slate-500">Input manual</p>
+          <h2 className="text-xl font-bold text-slate-900">Tambah absensi (Sakit, Izin, Site, Alpha)</h2>
+          <form onSubmit={submitManualAttendance} className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-5">
+            <label className="flex flex-col gap-1 text-sm font-medium text-slate-600">
+              Pegawai
+              <select
+                value={manualForm.employeeId}
+                onChange={(e) => setManualForm({ ...manualForm, employeeId: e.target.value })}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-emerald-400"
+              >
+                <option value="">Pilih pegawai</option>
+                {safeAttendance.employees.map((employee) => (
+                  <option key={employee.id} value={employee.id}>{employee.name}</option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-sm font-medium text-slate-600">
+              Status
+              <select
+                value={manualForm.status}
+                onChange={(e) => setManualForm({ ...manualForm, status: e.target.value })}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-emerald-400"
+              >
+                <option value="sakit">Sakit</option>
+                <option value="izin">Izin</option>
+                <option value="site">Site</option>
+                <option value="alpha">Alpha</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-sm font-medium text-slate-600">
+              Tanggal
+              <input
+                type="date"
+                required
+                value={manualForm.date || safeAttendance.today}
+                onChange={(e) => setManualForm({ ...manualForm, date: e.target.value })}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-emerald-400"
+              />
+            </label>
+            {manualForm.status === "site" ? (
+              <label className="flex flex-col gap-1 text-sm font-medium text-slate-600">
+                Jam masuk
+                <input
+                  type="time"
+                  value={manualForm.time}
+                  onChange={(e) => setManualForm({ ...manualForm, time: e.target.value })}
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-emerald-400"
+                />
+              </label>
+            ) : (
+              <label className="flex flex-col gap-1 text-sm font-medium text-slate-600">
+                Keterangan
+                <input
+                  type="text"
+                  maxLength={200}
+                  placeholder="Contoh: demam, urusan keluarga"
+                  value={manualForm.note}
+                  onChange={(e) => setManualForm({ ...manualForm, note: e.target.value })}
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-emerald-400"
+                />
+              </label>
+            )}
+            <div className="flex items-end">
+              <button
+                type="submit"
+                disabled={busy}
+                className="w-full rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
+              >
+                Simpan
+              </button>
+            </div>
+          </form>
+          {manualMessage && <p className="mt-3 text-sm text-slate-600">{manualMessage}</p>}
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
