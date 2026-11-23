@@ -544,51 +544,6 @@ export default function AdminPage() {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-emerald-200 bg-emerald-50 p-6 shadow-sm">
-          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-            <div>
-              <p className="text-sm font-medium text-emerald-700">Rekap harian</p>
-              <h2 className="text-xl font-bold text-slate-900">Ringkasan kehadiran hari ini</h2>
-              <p className="mt-1 text-sm text-slate-600">{safeAttendance.today}</p>
-            </div>
-            <a href={`/daily-summary?date=${safeAttendance.today}`} className="rounded-full border border-emerald-200 bg-white px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100">
-              Lihat detail harian
-            </a>
-          </div>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-            {[
-              ["Hadir", todaySummary?.hadir ?? stats.Hadir],
-              ["Terlambat", todaySummary?.terlambat ?? stats.Terlambat],
-              ["Pulang", todaySummary?.pulang ?? 0],
-              ["Izin / Sakit", (todaySummary?.izin ?? 0) + (todaySummary?.sakit ?? 0)],
-              ["Alpha", todaySummary?.alpha ?? 0],
-            ].map(([label, value]) => (
-              <div key={String(label)} className="rounded-xl border border-emerald-100 bg-white p-3">
-                <p className="text-xs text-slate-500">{label}</p>
-                <p className="mt-1 text-2xl font-bold text-slate-900">{value}</p>
-              </div>
-            ))}
-          </div>
-          <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            <div className="rounded-xl border border-emerald-100 bg-white p-4">
-              <p className="text-sm font-semibold text-slate-700">Pegawai hadir</p>
-              <p className="mt-2 text-sm text-slate-600">
-                {todaySummary?.attendees.length
-                  ? todaySummary.attendees.map((person) => `${person.name} (${person.status})`).join(", ")
-                  : "Belum ada pegawai hadir"}
-              </p>
-            </div>
-            <div className="rounded-xl border border-emerald-100 bg-white p-4">
-              <p className="text-sm font-semibold text-slate-700">Pegawai alpha</p>
-              <p className="mt-2 text-sm text-slate-600">
-                {todaySummary?.absentEmployees.length
-                  ? todaySummary.absentEmployees.join(", ")
-                  : "Tidak ada data alpha"}
-              </p>
-            </div>
-          </div>
-        </section>
-
         <section className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm font-medium text-slate-500">Koneksi Perangkat</p>
@@ -724,60 +679,48 @@ export default function AdminPage() {
           <p className="mt-1 text-xs text-blue-800">Tempelkan jari pada sensor. Admin akan memperbarui data absensi otomatis.</p>
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
+        <section className="rounded-2xl border border-emerald-200 bg-emerald-50 p-6 shadow-sm">
+          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
             <div>
-              <p className="text-sm font-medium text-slate-500">Riwayat verifikasi</p>
-              <h2 className="text-xl font-bold text-slate-900">Log sidik jari AS608</h2>
+              <p className="text-sm font-medium text-emerald-700">Rekap harian</p>
+              <h2 className="text-xl font-bold text-slate-900">Ringkasan kehadiran hari ini</h2>
+              <p className="mt-1 text-sm text-slate-600">{safeAttendance.today}</p>
             </div>
+            <a href={`/daily-summary?date=${safeAttendance.today}`} className="rounded-full border border-emerald-200 bg-white px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100">
+              Lihat detail harian
+            </a>
           </div>
-
-          <div className="mt-6 overflow-x-auto rounded-2xl border border-slate-200">
-            <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
-              <thead className="bg-slate-50 text-slate-600">
-                <tr>
-                  <th className="px-4 py-3 font-semibold">No</th>
-                  <th className="px-4 py-3 font-semibold">Nama</th>
-                  <th className="px-4 py-3 font-semibold">Device</th>
-                  <th className="px-4 py-3 font-semibold">Template ID</th>
-                  <th className="px-4 py-3 font-semibold">Status</th>
-                  <th className="px-4 py-3 font-semibold">Waktu</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200 bg-white">
-                {safeAttendance.verificationLogs && safeAttendance.verificationLogs.length > 0 ? (
-                  safeAttendance.verificationLogs.map((log, idx) => {
-                    const employee = log.employeeId ? safeAttendance.employees.find((e) => e.id === log.employeeId) : null;
-                    return (
-                      <tr key={log.id} className="hover:bg-slate-50">
-                        <td className="px-4 py-3 font-medium text-slate-900">{idx + 1}</td>
-                        <td className="px-4 py-3 text-slate-700">{employee?.name || "Belum dipetakan"}</td>
-                        <td className="px-4 py-3 text-slate-600">{log.deviceId || "-"}</td>
-                        <td className="px-4 py-3 font-medium text-slate-900">{log.templateId}</td>
-                        <td className="px-4 py-3">
-                          <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
-                            log.status === "Berhasil"
-                              ? "bg-emerald-100 text-emerald-700"
-                              : log.status.includes("Duplikat")
-                                ? "bg-amber-100 text-amber-700"
-                                : "bg-rose-100 text-rose-700"
-                          }`}>
-                            {log.status === "Berhasil" ? "Berhasil absen" : log.status}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-xs text-slate-500">{new Date(log.verifiedAt).toLocaleString("id-ID")}</td>
-                      </tr>
-                    );
-                  })
-                ) : (
-                  <tr>
-                    <td colSpan={6} className="px-4 py-6 text-center text-slate-500">
-                      Belum ada log verifikasi sidik jari
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            {[
+              ["Hadir", todaySummary?.hadir ?? stats.Hadir],
+              ["Terlambat", todaySummary?.terlambat ?? stats.Terlambat],
+              ["Pulang", todaySummary?.pulang ?? 0],
+              ["Izin / Sakit", (todaySummary?.izin ?? 0) + (todaySummary?.sakit ?? 0)],
+              ["Alpha", todaySummary?.alpha ?? 0],
+            ].map(([label, value]) => (
+              <div key={String(label)} className="rounded-xl border border-emerald-100 bg-white p-3">
+                <p className="text-xs text-slate-500">{label}</p>
+                <p className="mt-1 text-2xl font-bold text-slate-900">{value}</p>
+              </div>
+            ))}
+          </div>
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            <div className="rounded-xl border border-emerald-100 bg-white p-4">
+              <p className="text-sm font-semibold text-slate-700">Pegawai hadir</p>
+              <p className="mt-2 text-sm text-slate-600">
+                {todaySummary?.attendees.length
+                  ? todaySummary.attendees.map((person) => `${person.name} (${person.status})`).join(", ")
+                  : "Belum ada pegawai hadir"}
+              </p>
+            </div>
+            <div className="rounded-xl border border-emerald-100 bg-white p-4">
+              <p className="text-sm font-semibold text-slate-700">Pegawai alpha</p>
+              <p className="mt-2 text-sm text-slate-600">
+                {todaySummary?.absentEmployees.length
+                  ? todaySummary.absentEmployees.join(", ")
+                  : "Tidak ada data alpha"}
+              </p>
+            </div>
           </div>
         </section>
 
