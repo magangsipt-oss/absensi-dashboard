@@ -6,7 +6,7 @@ generator client {
 }
 
 datasource db {
-  provider = "mysql"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -44,7 +44,7 @@ model AttendanceRecord {
   name      String
   time      String
   status    AttendanceStatus
-  note      String           @db.LongText
+  note      String           @db.Text
   checkedAt DateTime
   createdAt DateTime         @default(now())
 
@@ -72,7 +72,7 @@ model FingerprintMapping {
   id           Int      @id @default(autoincrement())
   deviceId     String?
   templateId   Int      @unique
-  templateData String?  @db.LongText
+  templateData String?  @db.Text
   employeeId   Int?
   createdAt    DateTime @default(now())
 
@@ -100,7 +100,7 @@ model FingerprintVerificationLog {
   deviceId   String?
   templateId Int
   status     String    @default("Berhasil")
-  note       String?   @db.LongText
+  note       String?   @db.Text
   verifiedAt DateTime  @default(now())
   createdAt  DateTime  @default(now())
 

@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import mysql from "mysql2/promise";
+import pg from "pg";
 
 const backupRetentionDays = 365;
 const backupPropertyName = "absensiBackup";
@@ -11,32 +11,32 @@ const tables = [
   {
     name: "employees",
     columns: ["id", "name", "nickname", "email", "department", "pendingFingerprintId", "createdAt", "updatedAt"],
-    select: "SELECT id, name, nickname, email, department, pendingFingerprintId, createdAt, updatedAt FROM employees ORDER BY id",
+    select: 'SELECT id, name, nickname, email, department, "pendingFingerprintId", "createdAt", "updatedAt" FROM employees ORDER BY id',
   },
   {
     name: "attendance_records",
     columns: ["id", "employeeId", "name", "time", "status", "note", "checkedAt", "createdAt"],
-    select: "SELECT id, employeeId, name, time, status, note, checkedAt, createdAt FROM attendance_records ORDER BY id",
+    select: 'SELECT id, "employeeId", name, time, status::text AS status, note, "checkedAt", "createdAt" FROM attendance_records ORDER BY id',
   },
   {
     name: "fingerprint_mappings",
     columns: ["id", "deviceId", "templateId", "employeeId", "createdAt"],
-    select: "SELECT id, deviceId, templateId, employeeId, createdAt FROM fingerprint_mappings ORDER BY id",
+    select: 'SELECT id, "deviceId", "templateId", "employeeId", "createdAt" FROM fingerprint_mappings ORDER BY id',
   },
   {
     name: "fingerprint_mapping_audits",
     columns: ["id", "action", "templateId", "deviceId", "previousEmployeeId", "employeeId", "changedAt"],
-    select: "SELECT id, action, templateId, deviceId, previousEmployeeId, employeeId, changedAt FROM fingerprint_mapping_audits ORDER BY id",
+    select: 'SELECT id, action, "templateId", "deviceId", "previousEmployeeId", "employeeId", "changedAt" FROM fingerprint_mapping_audits ORDER BY id',
   },
   {
     name: "fingerprint_verification_logs",
     columns: ["id", "employeeId", "deviceId", "templateId", "status", "note", "verifiedAt", "createdAt"],
-    select: "SELECT id, employeeId, deviceId, templateId, status, note, verifiedAt, createdAt FROM fingerprint_verification_logs ORDER BY id",
+    select: 'SELECT id, "employeeId", "deviceId", "templateId", status, note, "verifiedAt", "createdAt" FROM fingerprint_verification_logs ORDER BY id',
   },
   {
     name: "device_commands",
     columns: ["id", "deviceId", "command", "templateId", "status", "createdAt", "processedAt"],
-    select: "SELECT id, deviceId, command, templateId, status, createdAt, processedAt FROM device_commands ORDER BY id",
+    select: 'SELECT id, "deviceId", command, "templateId", status, "createdAt", "processedAt" FROM device_commands ORDER BY id',
   },
 ];
 
@@ -57,32 +57,41 @@ function getEncryptionKey() {
 
 export function getDatabaseConfig(value) {
   const url = new URL(value);
-  if (url.protocol !== "mysql:" && url.protocol !== "mysql2:") {
-    throw new Error("DATABASE_URL must use the MySQL protocol.");
+  if (url.protocol !== "postgresql:" && url.protocol !== "postgres:") {
+    throw new Error("DATABASE_URL must use the PostgreSQL protocol.");
   }
   if (!url.hostname || !url.pathname || url.pathname === "/") {
-    throw new Error("DATABASE_URL must include a MySQL host and database name.");
+    throw new Error("DATABASE_URL must include a PostgreSQL host and database name.");
   }
   if (["localhost", "127.0.0.1", "::1"].includes(url.hostname.toLowerCase())) {
     throw new Error("Refusing to run a production backup against a local database host.");
   }
-  if (url.searchParams.get("ssl") !== "true") {
+  const sslMode = url.searchParams.get("sslmode");
+  if (url.searchParams.get("ssl") !== "true" && sslMode !== "require" && sslMode !== "verify-full") {
     throw new Error(
-      "MySQL connection URL must enable verified TLS with the ssl=true query parameter."
+      "PostgreSQL connection URL must enable verified TLS with ssl=true or sslmode=require."
     );
   }
 
   return {
     host: url.hostname,
-    port: Number(url.port || 3306),
+    port: Number(url.port || 5432),
     user: decodeURIComponent(url.username),
     password: decodeURIComponent(url.password),
     database: decodeURIComponent(url.pathname.slice(1)),
-    timezone: "Z",
-    dateStrings: true,
-    connectTimeout: 15000,
+    connectionTimeoutMillis: 15000,
     ssl: { rejectUnauthorized: true },
+    // Keep timestamp(3) columns as raw "YYYY-MM-DD HH:MM:SS.mmm" strings (UTC), as the MySQL backup did.
+    types: {
+      getTypeParser: (oid, format) => (oid === 1114 ? (value) => value : pg.types.getTypeParser(oid, format)),
+    },
   };
+}
+
+async function connectDatabase(config) {
+  const client = new pg.Client(config);
+  await client.connect();
+  return client;
 }
 
 function sha256(value) {
@@ -178,7 +187,7 @@ export function assertExpectedBackupTarget(config, expected) {
     config.port !== expected.port ||
     config.database.toLowerCase() !== expected.database.toLowerCase()
   ) {
-    throw new Error("Backup DATABASE_URL does not match the pinned Railway database target.");
+    throw new Error("Backup DATABASE_URL does not match the pinned database target.");
   }
 }
 
@@ -192,7 +201,7 @@ export function validateSnapshotForBackup(snapshot) {
   const { employees, attendance_records, fingerprint_mappings } = snapshot.tables;
   if (employees.length === 0 && attendance_records.length === 0 && fingerprint_mappings.length === 0) {
     throw new Error(
-      "Refusing to save an empty operational backup; verify the Railway database target before continuing."
+      "Refusing to save an empty operational backup; verify the database target before continuing."
     );
   }
 
@@ -221,16 +230,15 @@ export function validateSnapshotForBackup(snapshot) {
   }
 }
 
-async function createSnapshot(connection) {
-  await connection.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ");
-  await connection.query("START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY");
+async function createSnapshot(connection, config) {
+  await connection.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
   try {
-    const [[identity]] = await connection.query("SELECT DATABASE() AS databaseName");
+    const { rows: [identity] } = await connection.query('SELECT current_database() AS "databaseName"');
     if (!identity?.databaseName) throw new Error("Could not determine the source database name.");
 
     const snapshotTables = {};
     for (const table of tables) {
-      const [rows] = await connection.query(table.select);
+      const { rows } = await connection.query(table.select);
       snapshotTables[table.name] = rows;
     }
 
@@ -239,8 +247,8 @@ async function createSnapshot(connection) {
       version: 1,
       createdAt: new Date().toISOString(),
       source: {
-        host: connection.config.host,
-        port: connection.config.port,
+        host: config.host,
+        port: config.port,
         database: String(identity.databaseName),
       },
       included: [
@@ -261,7 +269,7 @@ async function createSnapshot(connection) {
     validateSnapshotForBackup(snapshot);
     return snapshot;
   } finally {
-    await connection.rollback();
+    await connection.query("ROLLBACK");
   }
 }
 
@@ -365,9 +373,9 @@ export async function runBackup() {
     port: Number(requiredEnvironment("BACKUP_EXPECTED_DATABASE_PORT")),
     database: requiredEnvironment("BACKUP_EXPECTED_DATABASE_NAME"),
   });
-  const connection = await mysql.createConnection(databaseConfig);
+  const connection = await connectDatabase(databaseConfig);
   try {
-    const snapshot = await createSnapshot(connection);
+    const snapshot = await createSnapshot(connection, databaseConfig);
     const accessToken = await getAccessToken();
     const uploaded = await uploadBackup(accessToken, snapshot, key);
     const uploadedContent = await downloadBackup(accessToken, uploaded.id);
@@ -402,8 +410,8 @@ async function downloadBackup(accessToken, fileId) {
 }
 
 async function restoreSnapshot(connection, snapshot) {
-  const [targetTables] = await connection.query(
-    "SELECT TABLE_NAME AS tableName FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE'"
+  const { rows: targetTables } = await connection.query(
+    "SELECT table_name AS \"tableName\" FROM information_schema.tables WHERE table_schema = current_schema() AND table_type = 'BASE TABLE'"
   );
   const targetTableNames = new Set(targetTables.map((row) => String(row.tableName)));
   for (const table of tables) {
@@ -414,31 +422,32 @@ async function restoreSnapshot(connection, snapshot) {
 
   for (const tableName of targetTableNames) {
     if (tableName === "_prisma_migrations") continue;
-    const escapedTableName = tableName.replaceAll("`", "``");
-    const [[row]] = await connection.query(`SELECT COUNT(*) AS rowCount FROM \`${escapedTableName}\``);
+    const escapedTableName = tableName.replaceAll('"', '""');
+    const { rows: [row] } = await connection.query(`SELECT COUNT(*) AS "rowCount" FROM "${escapedTableName}"`);
     if (Number(row.rowCount) !== 0) {
       throw new Error(`Restore refused: target table ${tableName} is not empty.`);
     }
   }
 
-  await connection.beginTransaction();
+  await connection.query("BEGIN");
   try {
     for (const table of tables) {
       const rows = snapshot.tables[table.name];
       if (rows.length === 0) continue;
-      const columns = table.columns.map((column) => `\`${column}\``).join(", ");
-      const placeholders = table.columns.map(() => "?").join(", ");
-      const query = `INSERT INTO \`${table.name}\` (${columns}) VALUES (${placeholders})`;
-      for (let offset = 0; offset < rows.length; offset += 250) {
-        const batch = rows.slice(offset, offset + 250);
-        for (const row of batch) {
-          await connection.execute(query, table.columns.map((column) => row[column] ?? null));
-        }
+      const columns = table.columns.map((column) => `"${column}"`).join(", ");
+      const placeholders = table.columns.map((_, index) => `$${index + 1}`).join(", ");
+      const query = `INSERT INTO "${table.name}" (${columns}) VALUES (${placeholders})`;
+      for (const row of rows) {
+        await connection.query(query, table.columns.map((column) => row[column] ?? null));
       }
+      // Explicit ids were inserted, so move the serial sequence past them.
+      await connection.query(
+        `SELECT setval(pg_get_serial_sequence('"${table.name}"', 'id'), (SELECT MAX(id) FROM "${table.name}"))`
+      );
     }
-    await connection.commit();
+    await connection.query("COMMIT");
   } catch (error) {
-    await connection.rollback();
+    await connection.query("ROLLBACK");
     throw error;
   }
 }
@@ -453,7 +462,7 @@ export async function runRestore(fileId) {
   const encrypted = await downloadBackup(accessToken, fileId);
   const snapshot = decryptBackup(encrypted, key);
   assertRestoreTargetIsDifferent(snapshot, targetConfig);
-  const connection = await mysql.createConnection(targetConfig);
+  const connection = await connectDatabase(targetConfig);
   try {
     await restoreSnapshot(connection, snapshot);
     console.info("Operational backup restored to an empty target database.", {

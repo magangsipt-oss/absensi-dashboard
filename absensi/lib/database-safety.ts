@@ -30,7 +30,7 @@ export async function assertProductionDatabaseTarget() {
   const configuredName = decodeURIComponent(configuredUrl.pathname.slice(1));
   if (
     configuredUrl.hostname.toLowerCase() !== expectedHost ||
-    Number(configuredUrl.port || 3306) !== expectedPort ||
+    Number(configuredUrl.port || 5432) !== expectedPort ||
     configuredName.toLowerCase() !== expectedName.toLowerCase()
   ) {
     throw new Error("DATABASE_URL does not match the pinned production database target.");
@@ -38,7 +38,7 @@ export async function assertProductionDatabaseTarget() {
 
   const [identity] = await prisma.$queryRaw<DatabaseHealthRow[]>`
     SELECT
-      DATABASE() AS databaseName,
+      current_database() AS "databaseName",
       (SELECT COUNT(*) FROM employees) AS employeeCount,
       (SELECT COUNT(*) FROM fingerprint_mappings) AS mappingCount,
       (SELECT COUNT(*) FROM attendance_records) AS attendanceCount

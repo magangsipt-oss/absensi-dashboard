@@ -135,7 +135,7 @@ async function getDatabaseIdentity(client: DatabaseQueryClient): Promise<Databas
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new FingerprintBackupConfigurationError("DATABASE_URL belum disetel.");
   const url = new URL(databaseUrl);
-  const rows = await client.$queryRaw<Array<{ databaseName: string | null }>>`SELECT DATABASE() AS databaseName`;
+  const rows = await client.$queryRaw<Array<{ databaseName: string | null }>>`SELECT current_database() AS "databaseName"`;
   if (!url.hostname || !rows[0]?.databaseName) throw new Error("Identitas database tidak dapat dipastikan.");
   return { host: url.hostname, database: String(rows[0].databaseName) };
 }

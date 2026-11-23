@@ -24,7 +24,7 @@ function createSnapshot(tables = emptyTables) {
     format: "absensi-full-operational-backup",
     version: 1,
     createdAt: "2026-10-21T14:00:00.000Z",
-    source: { host: "mysql.example.invalid", port: 3306, database: "absensi" },
+    source: { host: "db.example.invalid", port: 5432, database: "absensi" },
     included: ["employee profiles", "attendance records"],
     excluded: ["biometric fingerprint template data", "WebAuthn credentials and public keys"],
     tables,
@@ -63,12 +63,12 @@ test("encrypted operational backup rejects a modified envelope", () => {
 
 test("database connection requires verified TLS", () => {
   assert.throws(
-    () => getDatabaseConfig("mysql://backup:secret@db.example.invalid:3306/absensi"),
+    () => getDatabaseConfig("postgresql://backup:secret@db.example.invalid:5432/absensi"),
     /ssl=true/
   );
 
   const config = getDatabaseConfig(
-    "mysql://backup:secret@db.example.invalid:3306/absensi?ssl=true"
+    "postgresql://backup:secret@db.example.invalid:3306/absensi?ssl=true"
   );
   assert.deepEqual(config.ssl, { rejectUnauthorized: true });
   assert.equal(config.host, "db.example.invalid");
@@ -79,15 +79,15 @@ test("restore refuses its own source database", () => {
   const snapshot = createSnapshot();
   assert.throws(
     () => assertRestoreTargetIsDifferent(snapshot, {
-      host: "MYSQL.example.invalid",
-      port: 3306,
+      host: "DB.EXAMPLE.invalid",
+      port: 5432,
       database: "ABSENSI",
     }),
     /matches the backup source/
   );
   assert.doesNotThrow(() => assertRestoreTargetIsDifferent(snapshot, {
     host: "restore.example.invalid",
-    port: 3306,
+    port: 5432,
     database: "absensi",
   }));
 });
@@ -118,7 +118,7 @@ test("backup refuses fingerprint mappings without a matching employee", () => {
 
 test("backup refuses a DATABASE_URL that is not the pinned database", () => {
   const config = getDatabaseConfig(
-    "mysql://backup:secret@db.example.invalid:15140/absensi?ssl=true"
+    "postgresql://backup:secret@db.example.invalid:15140/absensi?ssl=true"
   );
   const expected = {
     host: "db.example.invalid",
@@ -128,6 +128,6 @@ test("backup refuses a DATABASE_URL that is not the pinned database", () => {
   assert.doesNotThrow(() => assertExpectedBackupTarget(config, expected));
   assert.throws(
     () => assertExpectedBackupTarget(config, { ...expected, database: "other" }),
-    /does not match the pinned Railway database/
+    /does not match the pinned database/
   );
 });
