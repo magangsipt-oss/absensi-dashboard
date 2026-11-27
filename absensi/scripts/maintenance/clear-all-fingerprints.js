@@ -4,7 +4,7 @@ const path = require('node:path');
 const prisma = new PrismaClient();
 
 const confirmation = '--confirm=DELETE-ALL-FINGERPRINTS';
-const backupsDirectory = path.join(__dirname, 'backups');
+const backupsDirectory = path.join(__dirname, '..', '..', 'backups');
 
 async function main() {
   const mappings = await prisma.fingerprintMapping.findMany({

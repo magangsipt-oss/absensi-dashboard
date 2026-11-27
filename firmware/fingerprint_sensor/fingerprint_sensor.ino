@@ -34,7 +34,8 @@ uint16_t lcdScrollOffset = 0;
 // Pastikan jaringan yang dipakai adalah 2.4 GHz agar ESP32 bisa terhubung stabil.
 const char* ssid = "WH Prapatan Atas_EXT";
 const char* password = "tangguhoptima2026";
-const char* attendanceApiUrl = "https://absensi-online-delta.vercel.app/api/attendance";
+// Alamat lama (Vercel): https://absensi-online-delta.vercel.app/api/attendance
+const char* attendanceApiUrl = "https://103-176-78-157.sslip.io/api/attendance";
 // Harus sama dengan environment variable DEVICE_KEY di Vercel.
 const char* deviceKey = "rahasia123";
 const char* deviceId = "ESP32-01";

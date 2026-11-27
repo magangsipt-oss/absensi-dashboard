@@ -16,5 +16,7 @@
 
 # Local application data and machine-specific diagnostics
 absensi/data/*.json
-maintenance/mysql-replication/*.txt
+archive/mysql-replication/*.txt
 absensi-lokal-backup-*.sql
+# Salinan backup lokal (berisi data pegawai)
+backups/

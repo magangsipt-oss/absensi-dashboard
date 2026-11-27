@@ -28,7 +28,7 @@ Endpoint GET kini hanya membaca: tidak lagi mengubah catatan absensi atau mengha
 
 Sensor fingerprint menyimpan template pada memorinya sendiri. Itu berbeda dari relasi database `fingerprint_mappings.templateId` → `employeeId`. Firmware pendaftaran mengirim ID ke server tanpa memilih pegawai, jadi hasil normalnya adalah mapping ada tetapi masih `employeeId = NULL`. Tapping tetap dikenali oleh sensor, tetapi tidak bisa dicatat sebagai absensi sampai ID dihubungkan ke pegawai.
 
-Pada firmware `fingerprint_sensor/fingerprint_sensor.ino`, ESP32 mengirim ulang daftar ID sensor ke endpoint database setelah boot dan setiap 60 detik saat Wi-Fi tersedia. Sinkronisasi hanya menambah ID yang belum dikenal/mengisi device ID yang kosong; tidak menghapus ID yang hilang dari satu respons dan tidak mengganti pegawai pada mapping yang sudah ada. Bila ditemukan pegawai yang memiliki `pendingFingerprintId` sama persis, ID itu dipetakan otomatis dan status pending dibersihkan. Jika koneksi gagal saat pendaftaran, sinkronisasi berikutnya mencoba lagi. Ketika scan absensi menemukan ID baru yang tidak ada di database, API juga mencatat ID itu sebagai belum dipetakan dan membuat log verifikasi agar bisa ditemukan di dashboard.
+Pada firmware `firmware/fingerprint_sensor/fingerprint_sensor.ino`, ESP32 mengirim ulang daftar ID sensor ke endpoint database setelah boot dan setiap 60 detik saat Wi-Fi tersedia. Sinkronisasi hanya menambah ID yang belum dikenal/mengisi device ID yang kosong; tidak menghapus ID yang hilang dari satu respons dan tidak mengganti pegawai pada mapping yang sudah ada. Bila ditemukan pegawai yang memiliki `pendingFingerprintId` sama persis, ID itu dipetakan otomatis dan status pending dibersihkan. Jika koneksi gagal saat pendaftaran, sinkronisasi berikutnya mencoba lagi. Ketika scan absensi menemukan ID baru yang tidak ada di database, API juga mencatat ID itu sebagai belum dipetakan dan membuat log verifikasi agar bisa ditemukan di dashboard.
 
 Langkah operator:
 
@@ -225,13 +225,13 @@ Pastikan migration audit sudah diterapkan dan koneksi mengarah ke database yang 
 
 ```powershell
 cd D:\Absensi\absensi
-node --env-file=.env.local --env-file=.env restore-fingerprint-mappings.js --from-audit
+node --env-file=.env.local --env-file=.env scripts/maintenance/restore-fingerprint-mappings.js --from-audit
 ```
 
 Periksa jumlahnya dan cocokkan dengan daftar pegawai/template yang diharapkan. Jika jumlah dan database sudah dipastikan benar, jalankan pemulihan eksplisit:
 
 ```powershell
-node --env-file=.env.local --env-file=.env restore-fingerprint-mappings.js --from-audit --confirm=RESTORE-FINGERPRINT-MAPPINGS
+node --env-file=.env.local --env-file=.env scripts/maintenance/restore-fingerprint-mappings.js --from-audit --confirm=RESTORE-FINGERPRINT-MAPPINGS
 ```
 
 Skrip menolak pemulihan bila ID pegawai tidak ada atau ada mapping yang sudah terhubung ke pegawai berbeda. Jangan menghapus mapping yang berkonflik untuk memaksa pemulihan; pulihkan/benahi data pegawai melalui backup database terlebih dahulu.
@@ -242,7 +242,7 @@ Untuk backup off-site dan pemulihan melalui Google Drive, ikuti langkah pada bag
 
 - Jangan gunakan `prisma migrate reset` pada database berisi data.
 - Jangan menghapus atau membuat ulang database sebelum memastikan backup, target koneksi, dan persetujuan pemulihan.
-- Jangan menjalankan `clear-all-fingerprints.js --confirm=DELETE-ALL-FINGERPRINTS` sebagai langkah memperbaiki HTTP 500. Flag tersebut memang menghapus template sensor dan mapping database.
+- Jangan menjalankan `scripts/maintenance/clear-all-fingerprints.js --confirm=DELETE-ALL-FINGERPRINTS` sebagai langkah memperbaiki HTTP 500. Flag tersebut memang menghapus template sensor dan mapping database.
 - Jangan menghapus tabel `fingerprint_mapping_audits`; tabel tersebut adalah riwayat pemulihan mapping.
 - Jangan menganggap ID hilang dari layar sebagai data terhapus sebelum API/database diperiksa.
 - Jangan menaruh `DATABASE_URL`, API key, atau data pegawai pada repository, screenshot publik, atau log terbuka.

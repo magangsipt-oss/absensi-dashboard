@@ -7,7 +7,7 @@ Pesan "Absen gagal - Periksa server" muncul karena ESP32 tidak dapat terhubung k
 ### Root Causes:
 
 **1. IP Server Hardcoded Salah (PRIMARY ISSUE)**
-- File: `fingerprint_sensor/fingerprint_sensor.ino` (line 25)
+- File: `firmware/fingerprint_sensor/fingerprint_sensor.ino` (line 25)
 - Current IP: `http://192.168.137.235:3000/api/attendance`
 - Actual Server IP: Sesuai dengan jaringan Wi‑Fi `SHINN` yang Anda pakai.
 
@@ -28,7 +28,7 @@ Pesan "Absen gagal - Periksa server" muncul karena ESP32 tidak dapat terhubung k
    - Cari IP lokal (biasanya `192.168.x.x` atau `10.x.x.x`)
    - Atau cek di `.env.local` file: `WEBAUTHN_ORIGIN=http://192.168.1.169:3000`
 
-2. **Update file `fingerprint_sensor/fingerprint_sensor.ino`:**
+2. **Update file `firmware/fingerprint_sensor/fingerprint_sensor.ino`:**
    ```cpp
    // Line 25 - UBAH INI:
    const char* attendanceApiUrl = "http://YOUR_SERVER_IP:3000/api/attendance";

@@ -60,29 +60,29 @@ DATABASE_URL="mysql://user:password@host.mysql.database.azure.com:3306/dbname"
 - Riwayat perubahan mapping disimpan otomatis di tabel `fingerprint_mapping_audits` pada transaksi yang sama dengan perubahan mapping. Satu baris audit ditulis hanya ketika mapping dibuat, dipasangkan, dilepas, atau dihapus; scan absensi biasa tidak menambah audit. Ini merekam ID template, perangkat, pegawai sebelum/sesudah, dan jenis perubahan tanpa menyimpan sidik jari mentah atau mengirim perintah tambahan ke ESP32. Migration `20261021093000_add_fingerprint_mapping_audit` harus diterapkan sebelum kode aplikasi baru dirilis; migration membuat baseline untuk semua mapping yang sudah ada.
 - Riwayat audit membantu memulihkan mapping jika ada perubahan/penghapusan tidak sengaja selama database masih tersedia. Dari folder proyek, pemeriksaan tanpa perubahan:
   ```bash
-  node --env-file=.env.local --env-file=.env restore-fingerprint-mappings.js --from-audit
+  node --env-file=.env.local --env-file=.env scripts/maintenance/restore-fingerprint-mappings.js --from-audit
   ```
   Untuk memulihkan mapping dari audit setelah memeriksa jumlahnya:
   ```bash
-  node --env-file=.env.local --env-file=.env restore-fingerprint-mappings.js --from-audit --confirm=RESTORE-FINGERPRINT-MAPPINGS
+  node --env-file=.env.local --env-file=.env scripts/maintenance/restore-fingerprint-mappings.js --from-audit --confirm=RESTORE-FINGERPRINT-MAPPINGS
   ```
   Pemulihan berhenti jika pegawai sudah tidak ada atau mapping berkonflik; template ESP32 tidak diubah.
 - Atur backup otomatis harian database MySQL pada penyedia database, dengan retensi minimal 7 hari. Simpan backup di lokasi terpisah dari database utama.
 - Setelah mengaktifkan backup, uji pemulihan ke database staging secara berkala. Backup yang belum pernah diuji belum dapat dianggap dapat dipulihkan.
 - Untuk membuat backup mapping lokal sebelum perubahan, jalankan dari folder proyek:
   ```bash
-  node --env-file=.env.local --env-file=.env clear-all-fingerprints.js
+  node --env-file=.env.local --env-file=.env scripts/maintenance/clear-all-fingerprints.js
   ```
   Perintah tanpa flag hanya membuat file JSON di `backups/`; tidak menghapus data. Folder ini diabaikan Git.
 - Jika diperlukan penghapusan penuh yang disengaja, skrip meminta flag persetujuan eksplisit:
   ```bash
-  node --env-file=.env.local --env-file=.env clear-all-fingerprints.js --confirm=DELETE-ALL-FINGERPRINTS
+  node --env-file=.env.local --env-file=.env scripts/maintenance/clear-all-fingerprints.js --confirm=DELETE-ALL-FINGERPRINTS
   ```
   Skrip mencoba menghapus template di sensor lebih dahulu. Bila ESP32, port serial, atau endpoint gagal, mapping database tidak dihapus.
 - Untuk pemulihan, jalankan dulu tanpa flag untuk memvalidasi dan melihat jumlah data, lalu tambahkan flag konfirmasi:
   ```bash
-  node --env-file=.env.local --env-file=.env restore-fingerprint-mappings.js backups\<nama-file-backup>.json
-  node --env-file=.env.local --env-file=.env restore-fingerprint-mappings.js backups\<nama-file-backup>.json --confirm=RESTORE-FINGERPRINT-MAPPINGS
+  node --env-file=.env.local --env-file=.env scripts/maintenance/restore-fingerprint-mappings.js backups\<nama-file-backup>.json
+  node --env-file=.env.local --env-file=.env scripts/maintenance/restore-fingerprint-mappings.js backups\<nama-file-backup>.json --confirm=RESTORE-FINGERPRINT-MAPPINGS
   ```
   Backup ini berisi ID template, device ID, employee ID, dan pendaftaran tertunda, bukan data biometrik template. Pemulihan menolak pegawai yang sudah tidak ada atau mapping yang bertentangan.
 

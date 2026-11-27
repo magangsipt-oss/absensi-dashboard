@@ -26,7 +26,7 @@ Dokumentasi ini menjelaskan langkah-langkah lengkap untuk menghubungkan ESP32 + 
 
 ## 2a. Mode ESP32 dengan LCD I2C
 
-Sketch `fingerprint_sensor/fingerprint_sensor.ino` menggunakan LCD I2C 16x2 dan tidak membutuhkan Serial Monitor untuk operasi harian.
+Sketch `firmware/fingerprint_sensor/fingerprint_sensor.ino` menggunakan LCD I2C 16x2 dan tidak membutuhkan Serial Monitor untuk operasi harian.
 
 Pasang library **LiquidCrystal I2C** dari Library Manager Arduino IDE. Wiring LCD ke ESP32:
 
@@ -43,7 +43,7 @@ Tombol tetap menggunakan GPIO 19 untuk daftar dan GPIO 23 untuk batal. Penghapus
 
 ## 2b. Mode simultan dengan Serial Monitor
 
-Sketch `as608/ESP32_STATUS_SERVER.ino` mengirim hasil scan dan pendaftaran ke API melalui Wi-Fi. Dengan mode ini, Serial Monitor boleh tetap terbuka karena web tidak lagi membaca `COM7`.
+Sketch `firmware/ESP32_STATUS_SERVER/ESP32_STATUS_SERVER.ino` mengirim hasil scan dan pendaftaran ke API melalui Wi-Fi. Dengan mode ini, Serial Monitor boleh tetap terbuka karena web tidak lagi membaca `COM7`.
 
 Sesuaikan tiga konstanta pada sketch:
 
@@ -71,7 +71,7 @@ ESP32 akan mengirim request ke endpoint:
 
 ## 3. Alur kerja perangkat
 
-1. Untuk penggunaan dengan Vercel/production, upload sketch utama `fingerprint_sensor/fingerprint_sensor.ino`. Sketch ini mengirim daftar ID yang benar-benar tersimpan di sensor ke backend setelah boot dan setiap 60 detik saat Wi-Fi online. Sketch `as608/ESP32_STATUS_SERVER.ino` adalah mode lama untuk integrasi lokal/Serial dan tidak melakukan sinkronisasi cloud ini.
+1. Untuk penggunaan dengan Vercel/production, upload sketch utama `firmware/fingerprint_sensor/fingerprint_sensor.ino`. Sketch ini mengirim daftar ID yang benar-benar tersimpan di sensor ke backend setelah boot dan setiap 60 detik saat Wi-Fi online. Sketch `firmware/ESP32_STATUS_SERVER/ESP32_STATUS_SERVER.ino` adalah mode lama untuk integrasi lokal/Serial dan tidak melakukan sinkronisasi cloud ini.
 2. Pastikan `attendanceApiUrl`, `DEVICE_KEY`, dan `deviceId` pada firmware sesuai dengan backend dan secret Vercel. Tombol **Sinkronkan dari ESP32** di Admin mengantrekan perintah; perangkat memprosesnya saat online.
 3. Jika `pendingFingerprintId` pegawai sama persis dengan ID sensor, backend memetakan otomatis. Selain itu, cocokkan ID dengan pegawai yang benar lalu klik **Map**. Jangan menghapus atau mendaftarkan ulang sidik jari yang LCD-nya mengatakan sudah terdaftar.
 

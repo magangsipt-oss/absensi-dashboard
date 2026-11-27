@@ -1,7 +1,7 @@
 @echo off
 setlocal
 
-set "APP_DIR=%~dp0absensi"
+set "APP_DIR=%~dp0..\..\absensi"
 cd /d "%APP_DIR%"
 
 powershell.exe -NoProfile -Command "try { Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction Stop | Out-Null; exit 0 } catch { exit 1 }"
