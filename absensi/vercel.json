@@ -6,6 +6,10 @@
     {
       "path": "/api/cron/fingerprint-mapping-backup",
       "schedule": "0 10 * * 0"
+    },
+    {
+      "path": "/api/cron/attendance-retention",
+      "schedule": "0 18 1 * *"
     }
   ]
 }

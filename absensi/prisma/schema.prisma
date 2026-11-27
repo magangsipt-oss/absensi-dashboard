@@ -122,3 +122,15 @@ model DeviceCommand {
   @@index([deviceId, status])
   @@map("device_commands")
 }
+
+model AttendanceArchive {
+  id        Int      @id @default(autoincrement())
+  month     String   @db.VarChar(7)
+  rowCount  Int
+  content   String   @db.Text
+  sha256    String   @db.VarChar(64)
+  createdAt DateTime @default(now())
+
+  @@index([month])
+  @@map("attendance_archives")
+}

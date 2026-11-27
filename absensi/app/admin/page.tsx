@@ -72,6 +72,7 @@ export default function AdminPage() {
   const [fingerprintListener, setFingerprintListener] = useState("Menyiapkan listener fingerprint...");
   const [mappingMessage, setMappingMessage] = useState<string | null>(null);
   const [manualMessage, setManualMessage] = useState<string | null>(null);
+  const [archives, setArchives] = useState<Array<{ month: string; rows: number }>>([]);
   const [manualForm, setManualForm] = useState({
     employeeId: "",
     status: "sakit",
@@ -267,6 +268,12 @@ export default function AdminPage() {
   useEffect(() => {
     const id = window.setTimeout(() => {
       void fetchAttendance();
+      void fetch("/api/attendance/archive")
+        .then((response) => (response.ok ? response.json() : null))
+        .then((data) => {
+          if (data && Array.isArray(data.archives)) setArchives(data.archives);
+        })
+        .catch(() => undefined);
     }, 0);
 
     return () => window.clearTimeout(id);
@@ -961,6 +968,30 @@ export default function AdminPage() {
               </tbody>
             </table>
           </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <p className="text-sm font-medium text-slate-500">Retensi data</p>
+          <h2 className="text-xl font-bold text-slate-900">Arsip absensi</h2>
+          <p className="mt-1 text-sm text-slate-600">
+            Absensi lebih dari 2 bulan (bulan ini dan bulan lalu tetap tampil) diarsipkan otomatis tiap tanggal 1, lalu dihapus dari tabel utama.
+          </p>
+          {archives.length > 0 ? (
+            <ul className="mt-4 flex flex-wrap gap-2">
+              {archives.map((archive) => (
+                <li key={archive.month}>
+                  <a
+                    href={`/api/attendance/archive?month=${archive.month}`}
+                    className="inline-block rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100"
+                  >
+                    {archive.month} ({archive.rows} data) - Unduh CSV
+                  </a>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-4 text-sm text-slate-500">Belum ada arsip.</p>
+          )}
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
