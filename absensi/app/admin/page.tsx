@@ -231,6 +231,39 @@ export default function AdminPage() {
     }
   };
 
+  const deleteTemplateMapping = async (templateId: number) => {
+    if (
+      !window.confirm(
+        `Hapus ID ${templateId}? Sidik jari ID ini akan dihapus dari sensor ESP32 dan tidak bisa dikembalikan. Pegawai harus daftar ulang.`
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setMappingMessage(null);
+    try {
+      const response = await fetch("/api/attendance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "deleteMapping",
+          templateId,
+          confirmation: "DELETE_FINGERPRINT_MAPPING",
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Gagal menghapus mapping");
+      await fetchAttendance();
+      setMappingMessage(
+        `ID ${templateId} dihapus dari web. Perintah hapus dikirim ke ESP32 dan dijalankan saat perangkat online.`
+      );
+    } catch (error) {
+      setMappingMessage(error instanceof Error ? error.message : "Gagal menghapus mapping");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   useEffect(() => {
     const id = window.setTimeout(() => {
       void fetchAttendance();
@@ -1067,6 +1100,13 @@ export default function AdminPage() {
                               Map
                             </button>
                           )}
+                          <button
+                            onClick={() => void deleteTemplateMapping(m.templateId)}
+                            disabled={busy}
+                            className="rounded border border-rose-200 px-3 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50"
+                          >
+                            Hapus ID
+                          </button>
                         </div>
                       </td>
                     </tr>
